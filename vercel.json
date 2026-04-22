@@ -1,7 +1,10 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
   "rewrites": [
     {
-      "source": "/((?!assets|favicon.ico|robots.txt).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
