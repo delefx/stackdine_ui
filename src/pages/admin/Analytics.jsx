@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import AdminLayout from '../../components/AdminLayout';
 import API from '../../api/axios';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const AdminAnalytics = () => {
   const [sales, setSales] = useState(null);
@@ -18,7 +20,6 @@ const AdminAnalytics = () => {
       const params = dateRange.startDate && dateRange.endDate
         ? `?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`
         : '';
-
       const [salesRes, orderRes, menuRes, customerRes, reservationRes] =
         await Promise.all([
           API.get(`/analytics/sales${params}`),
@@ -27,7 +28,6 @@ const AdminAnalytics = () => {
           API.get('/analytics/customers'),
           API.get('/analytics/reservations'),
         ]);
-
       setSales(salesRes.data.data);
       setOrderStats(orderRes.data.data);
       setMenuPopularity(menuRes.data.data);
@@ -42,6 +42,59 @@ const AdminAnalytics = () => {
 
   useEffect(() => { fetchAnalytics(); }, []);
 
+  const exportCSV = (data, filename) => {
+    if (!data || data.length === 0) return;
+    const headers = Object.keys(data[0]).join(',');
+    const rows = data.map((row) => Object.values(row).join(',')).join('\n');
+    const blob = new Blob([`${headers}\n${rows}`], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportPDF = (title, columns, data) => {
+    if (!data || data.length === 0) return;
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.setTextColor(249, 115, 22);
+    doc.text('StackDine', 14, 20);
+    doc.setFontSize(13);
+    doc.setTextColor(100);
+    doc.text(title, 14, 30);
+    doc.setFontSize(10);
+    doc.setTextColor(150);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 38);
+    autoTable(doc, {
+      startY: 45,
+      head: [columns],
+      body: data,
+      headStyles: { fillColor: [249, 115, 22], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+      styles: { fontSize: 10 },
+    });
+    doc.save(`${title.toLowerCase().replace(/ /g, '_')}.pdf`);
+  };
+
+  const ExportButtons = ({ onCSV, onPDF }) => (
+    <div className="flex gap-2">
+      <button
+        onClick={onCSV}
+        className="text-xs bg-gray-800 text-gray-300 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition"
+      >
+        Export CSV
+      </button>
+      <button
+        onClick={onPDF}
+        className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg transition"
+      >
+        Export PDF
+      </button>
+    </div>
+  );
+
   return (
     <AdminLayout>
       <div className="space-y-8">
@@ -49,11 +102,8 @@ const AdminAnalytics = () => {
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
             <h2 className="text-2xl font-bold text-white">Analytics</h2>
-            <p className="text-gray-400 text-sm mt-1">
-              Business performance overview
-            </p>
+            <p className="text-gray-400 text-sm mt-1">Business performance overview</p>
           </div>
-          {/* Date range filter */}
           <div className="flex items-center gap-3">
             <input
               type="date"
@@ -88,26 +138,10 @@ const AdminAnalytics = () => {
             {/* Sales summary cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                {
-                  label: 'Total Revenue',
-                  value: `₦${sales?.totalRevenue?.toLocaleString() || 0}`,
-                  color: 'text-orange-400',
-                },
-                {
-                  label: 'Total Orders',
-                  value: sales?.totalOrders || 0,
-                  color: 'text-blue-400',
-                },
-                {
-                  label: 'Avg Order Value',
-                  value: `₦${Math.round(sales?.averageOrderValue || 0).toLocaleString()}`,
-                  color: 'text-green-400',
-                },
-                {
-                  label: 'Total Customers',
-                  value: customerStats?.totalCustomers || 0,
-                  color: 'text-purple-400',
-                },
+                { label: 'Total Revenue', value: `₦${sales?.totalRevenue?.toLocaleString() || 0}`, color: 'text-orange-400' },
+                { label: 'Total Orders', value: sales?.totalOrders || 0, color: 'text-blue-400' },
+                { label: 'Avg Order Value', value: `₦${Math.round(sales?.averageOrderValue || 0).toLocaleString()}`, color: 'text-green-400' },
+                { label: 'Total Customers', value: customerStats?.totalCustomers || 0, color: 'text-purple-400' },
               ].map((card, i) => (
                 <motion.div
                   key={i}
@@ -129,8 +163,19 @@ const AdminAnalytics = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden"
               >
-                <div className="px-6 py-4 border-b border-gray-800">
+                <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
                   <h3 className="text-white font-semibold">Daily Sales</h3>
+                  <ExportButtons
+                    onCSV={() => exportCSV(
+                      sales.dailySales.map((d) => ({ Date: d._id, Orders: d.orderCount, Revenue: d.totalSales })),
+                      'daily_sales'
+                    )}
+                    onPDF={() => exportPDF(
+                      'Daily Sales Report',
+                      ['Date', 'Orders', 'Revenue (₦)'],
+                      sales.dailySales.map((d) => [d._id, d.orderCount, d.totalSales?.toLocaleString()])
+                    )}
+                  />
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -164,8 +209,19 @@ const AdminAnalytics = () => {
                 animate={{ opacity: 1, x: 0 }}
                 className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden"
               >
-                <div className="px-6 py-4 border-b border-gray-800">
+                <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
                   <h3 className="text-white font-semibold">Orders by Status</h3>
+                  <ExportButtons
+                    onCSV={() => exportCSV(
+                      orderStats?.ordersByStatus?.map((s) => ({ Status: s._id, Count: s.count })),
+                      'orders_by_status'
+                    )}
+                    onPDF={() => exportPDF(
+                      'Orders by Status',
+                      ['Status', 'Count'],
+                      orderStats?.ordersByStatus?.map((s) => [s._id, s.count])
+                    )}
+                  />
                 </div>
                 <div className="divide-y divide-gray-800">
                   {orderStats?.ordersByStatus?.map((s, i) => (
@@ -183,8 +239,19 @@ const AdminAnalytics = () => {
                 animate={{ opacity: 1, x: 0 }}
                 className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden"
               >
-                <div className="px-6 py-4 border-b border-gray-800">
+                <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
                   <h3 className="text-white font-semibold">Orders by Type</h3>
+                  <ExportButtons
+                    onCSV={() => exportCSV(
+                      orderStats?.ordersByType?.map((t) => ({ Type: t._id, Count: t.count, Revenue: t.totalRevenue })),
+                      'orders_by_type'
+                    )}
+                    onPDF={() => exportPDF(
+                      'Orders by Type',
+                      ['Type', 'Count', 'Revenue (₦)'],
+                      orderStats?.ordersByType?.map((t) => [t._id, t.count, t.totalRevenue?.toLocaleString()])
+                    )}
+                  />
                 </div>
                 <div className="divide-y divide-gray-800">
                   {orderStats?.ordersByType?.map((t, i) => (
@@ -192,9 +259,7 @@ const AdminAnalytics = () => {
                       <span className="text-gray-400 capitalize">{t._id}</span>
                       <div className="text-right">
                         <p className="text-white font-semibold">{t.count} orders</p>
-                        <p className="text-orange-400 text-xs">
-                          ₦{t.totalRevenue?.toLocaleString()}
-                        </p>
+                        <p className="text-orange-400 text-xs">₦{t.totalRevenue?.toLocaleString()}</p>
                       </div>
                     </div>
                   ))}
@@ -207,15 +272,24 @@ const AdminAnalytics = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden"
               >
-                <div className="px-6 py-4 border-b border-gray-800">
+                <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
                   <h3 className="text-white font-semibold">Peak Hours</h3>
+                  <ExportButtons
+                    onCSV={() => exportCSV(
+                      orderStats?.peakHours?.map((h) => ({ Hour: `${h._id}:00`, Orders: h.count })),
+                      'peak_hours'
+                    )}
+                    onPDF={() => exportPDF(
+                      'Peak Hours Report',
+                      ['Hour', 'Orders'],
+                      orderStats?.peakHours?.map((h) => [`${h._id}:00 - ${h._id + 1}:00`, h.count])
+                    )}
+                  />
                 </div>
                 <div className="divide-y divide-gray-800">
                   {orderStats?.peakHours?.map((h, i) => (
                     <div key={i} className="px-6 py-3 flex justify-between text-sm">
-                      <span className="text-gray-400">
-                        {h._id}:00 — {h._id + 1}:00
-                      </span>
+                      <span className="text-gray-400">{h._id}:00 — {h._id + 1}:00</span>
                       <span className="text-white font-semibold">{h.count} orders</span>
                     </div>
                   ))}
@@ -228,8 +302,19 @@ const AdminAnalytics = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden"
               >
-                <div className="px-6 py-4 border-b border-gray-800">
+                <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
                   <h3 className="text-white font-semibold">Reservations by Status</h3>
+                  <ExportButtons
+                    onCSV={() => exportCSV(
+                      reservationStats?.reservationsByStatus?.map((r) => ({ Status: r._id, Count: r.count })),
+                      'reservations_by_status'
+                    )}
+                    onPDF={() => exportPDF(
+                      'Reservations by Status',
+                      ['Status', 'Count'],
+                      reservationStats?.reservationsByStatus?.map((r) => [r._id, r.count])
+                    )}
+                  />
                 </div>
                 <div className="divide-y divide-gray-800">
                   {reservationStats?.reservationsByStatus?.length === 0 ? (
@@ -246,14 +331,25 @@ const AdminAnalytics = () => {
               </motion.div>
             </div>
 
-            {/* Top menu items */}
+            {/* Menu popularity */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden"
             >
-              <div className="px-6 py-4 border-b border-gray-800">
+              <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
                 <h3 className="text-white font-semibold">Menu Popularity</h3>
+                <ExportButtons
+                  onCSV={() => exportCSV(
+                    menuPopularity.map((item) => ({ Name: item.name, Category: item.category, Orders: item.totalOrdered, Revenue: item.totalRevenue })),
+                    'menu_popularity'
+                  )}
+                  onPDF={() => exportPDF(
+                    'Menu Popularity Report',
+                    ['#', 'Item', 'Category', 'Orders', 'Revenue (₦)'],
+                    menuPopularity.map((item, i) => [`#${i + 1}`, item.name, item.category, item.totalOrdered, item.totalRevenue?.toLocaleString()])
+                  )}
+                />
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -269,9 +365,7 @@ const AdminAnalytics = () => {
                   <tbody className="divide-y divide-gray-800">
                     {menuPopularity.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="text-center text-gray-500 py-6 text-sm">
-                          No data yet
-                        </td>
+                        <td colSpan={5} className="text-center text-gray-500 py-6 text-sm">No data yet</td>
                       </tr>
                     ) : (
                       menuPopularity.map((item, i) => (
@@ -297,8 +391,19 @@ const AdminAnalytics = () => {
               animate={{ opacity: 1, y: 0 }}
               className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden"
             >
-              <div className="px-6 py-4 border-b border-gray-800">
+              <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
                 <h3 className="text-white font-semibold">Customer Growth</h3>
+                <ExportButtons
+                  onCSV={() => exportCSV(
+                    customerStats?.customerGrowth?.map((g) => ({ Month: g._id, 'New Customers': g.newCustomers })),
+                    'customer_growth'
+                  )}
+                  onPDF={() => exportPDF(
+                    'Customer Growth Report',
+                    ['Month', 'New Customers'],
+                    customerStats?.customerGrowth?.map((g) => [g._id, g.newCustomers])
+                  )}
+                />
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -312,9 +417,7 @@ const AdminAnalytics = () => {
                     {customerStats?.customerGrowth?.map((g, i) => (
                       <tr key={i} className="hover:bg-gray-800/50 transition">
                         <td className="px-6 py-3 text-white text-sm">{g._id}</td>
-                        <td className="px-6 py-3 text-purple-400 text-sm font-semibold">
-                          {g.newCustomers}
-                        </td>
+                        <td className="px-6 py-3 text-purple-400 text-sm font-semibold">{g.newCustomers}</td>
                       </tr>
                     ))}
                   </tbody>
